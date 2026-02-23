@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cyberpunk Glass Sphere | Three.js Hero</title>
+
+  <style>
+    *,
+    *::before,
+    *::after {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      overflow: hidden;
+      background: #0a0a0f;
+      font-family: 'Courier New', monospace;
+      color: #e0e0e0;
+    }
+
+    /* ── Loading overlay ───────────────────────────────── */
+    #loader {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #0a0a0f;
+      transition: opacity 0.6s ease;
+    }
+
+    #loader.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .loader-ring {
+      width: 60px;
+      height: 60px;
+      border: 3px solid transparent;
+      border-top-color: #ff00ff;
+      border-right-color: #00ffff;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    .loader-text {
+      margin-top: 1rem;
+      font-size: 0.85rem;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: #888;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ── Canvas ─────────────────────────────────────────── */
+    #hero-canvas {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* ── Hero text overlay ─────────────────────────────── */
+    #hero-text {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      user-select: none;
+    }
+
+    #hero-text h1 {
+      font-size: clamp(2.4rem, 7vw, 6rem);
+      font-weight: 900;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: linear-gradient(135deg, #ff00ff, #00ffff, #ff00ff);
+      background-size: 200% 200%;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      animation: gradientShift 4s ease infinite;
+      opacity: 0;
+      position: relative;
+    }
+
+    #hero-text p {
+      font-size: clamp(0.85rem, 1.6vw, 1.2rem);
+      letter-spacing: 6px;
+      text-transform: uppercase;
+      color: #aaa;
+      margin-top: 0.8rem;
+      opacity: 0;
+    }
+
+    @keyframes gradientShift {
+      0%, 100% { background-position: 0% 50%; }
+      50%      { background-position: 100% 50%; }
+    }
+
+    /* ── Glitch layer ──────────────────────────────────── */
+    .glitch-active {
+      animation: glitch 0.15s steps(2, end) infinite;
+    }
+
+    @keyframes glitch {
+      0%   { text-shadow: 2px 0 #ff00ff, -2px 0 #00ffff; transform: translate(0); }
+      25%  { text-shadow: -2px -1px #ff00ff, 2px 1px #00ffff; transform: translate(-1px, 1px); }
+      50%  { text-shadow: 1px 2px #ff00ff, -1px -2px #00ffff; transform: translate(1px, -1px); }
+      75%  { text-shadow: -1px 1px #ff00ff, 1px -1px #00ffff; transform: translate(-2px, 0); }
+      100% { text-shadow: 2px -2px #ff00ff, -2px 2px #00ffff; transform: translate(0); }
+    }
+
+    /* ── Click hint ────────────────────────────────────── */
+    #click-hint {
+      position: fixed;
+      bottom: 2rem;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      font-size: 0.75rem;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: #555;
+      opacity: 0;
+      pointer-events: none;
+    }
+  </style>
+
+  <!-- ── Import Map ──────────────────────────────────── -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three":                "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js",
+      "three/addons/":        "https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <!-- GSAP from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+</head>
+<body>
+
+  <!-- Loading overlay -->
+  <div id="loader">
+    <div class="loader-ring"></div>
+    <p class="loader-text">Initializing</p>
+  </div>
+
+  <!-- Three.js canvas -->
+  <canvas id="hero-canvas"></canvas>
+
+  <!-- Hero text -->
+  <div id="hero-text">
+    <h1 id="title">CYBERPUNK</h1>
+    <p id="subtitle">enter the neon grid</p>
+  </div>
+
+  <!-- Click hint -->
+  <div id="click-hint">[ click the sphere ]</div>
+
+  <!-- ── Main module ──────────────────────────────────── -->
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls }    from 'three/addons/controls/OrbitControls.js';
+    import { EffectComposer }   from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass }       from 'three/addons/postprocessing/RenderPass.js';
+    import { UnrealBloomPass }  from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+    /* ━━━━━━━━━━━━━━━━━━━  Constants  ━━━━━━━━━━━━━━━━━━━ */
+    const PARTICLE_COUNT   = 5000;
+    const SPHERE_RADIUS    = 1.8;
+    const EXPLODE_FORCE    = 8;
+    const REFORM_DURATION  = 1.8;
+    const COLORS = {
+      magenta:  new THREE.Color(0xff00ff),
+      cyan:     new THREE.Color(0x00ffff),
+      violet:   new THREE.Color(0x8b00ff),
+      bg:       new THREE.Color(0x0a0a0f),
+    };
+
+    /* ━━━━━━━━━━━━━━━━━━━  Setup  ━━━━━━━━━━━━━━━━━━━━━━━ */
+    const canvas   = document.getElementById('hero-canvas');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+
+    const scene  = new THREE.Scene();
+    scene.background = COLORS.bg;
+    scene.fog = new THREE.FogExp2(0x0a0a0f, 0.06);
+
+    const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 100);
+    camera.position.set(0, 0, 6);
+
+    /* Subtle orbit controls (damped, no zoom on scroll) */
+    const controls = new OrbitControls(camera, canvas);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.enableZoom = false;
+    controls.enablePan = false;
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 0.4;
+
+    /* ━━━━━━━━━━━━━━━━  Post-processing  ━━━━━━━━━━━━━━━━ */
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+
+    const bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(window.innerWidth, window.innerHeight),
+      1.4,   // strength
+      0.6,   // radius
+      0.25   // threshold
+    );
+    composer.addPass(bloomPass);
+
+    /* ━━━━━━━━━━━━━━━  Glass sphere core  ━━━━━━━━━━━━━━━ */
+    const sphereGeo = new THREE.IcosahedronGeometry(SPHERE_RADIUS, 5);
+    const sphereMat = new THREE.MeshPhysicalMaterial({
+      color:              0x111122,
+      metalness:          0.1,
+      roughness:          0.05,
+      transmission:       0.92,
+      thickness:          2.5,
+      ior:                1.45,
+      envMapIntensity:    1.0,
+      clearcoat:          1.0,
+      clearcoatRoughness: 0.05,
+      transparent:        true,
+      opacity:            0.85,
+    });
+    const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+    scene.add(sphere);
+
+    /* Inner glow core */
+    const coreGeo = new THREE.IcosahedronGeometry(SPHERE_RADIUS * 0.35, 3);
+    const coreMat = new THREE.MeshBasicMaterial({ color: COLORS.magenta });
+    const core = new THREE.Mesh(coreGeo, coreMat);
+    sphere.add(core);
+
+    /* Wireframe overlay */
+    const wireGeo = new THREE.IcosahedronGeometry(SPHERE_RADIUS * 1.01, 2);
+    const wireMat = new THREE.MeshBasicMaterial({
+      color:     COLORS.cyan,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.12,
+    });
+    const wireframe = new THREE.Mesh(wireGeo, wireMat);
+    sphere.add(wireframe);
+
+    /* ━━━━━━━━━━━━━━━  Particle system  ━━━━━━━━━━━━━━━━━ */
+    const particleGeo = new THREE.BufferGeometry();
+    const positions   = new Float32Array(PARTICLE_COUNT * 3);
+    const originals   = new Float32Array(PARTICLE_COUNT * 3);   // home positions
+    const velocities  = new Float32Array(PARTICLE_COUNT * 3);
+    const colors      = new Float32Array(PARTICLE_COUNT * 3);
+    const sizes       = new Float32Array(PARTICLE_COUNT);
+
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      const i3 = i * 3;
+      /* Distribute on sphere surface */
+      const theta = Math.random() * Math.PI * 2;
+      const phi   = Math.acos(2 * Math.random() - 1);
+      const r     = SPHERE_RADIUS * (0.9 + Math.random() * 0.3);
+
+      const x = r * Math.sin(phi) * Math.cos(theta);
+      const y = r * Math.sin(phi) * Math.sin(theta);
+      const z = r * Math.cos(phi);
+
+      positions[i3]     = originals[i3]     = x;
+      positions[i3 + 1] = originals[i3 + 1] = y;
+      positions[i3 + 2] = originals[i3 + 2] = z;
+
+      velocities[i3] = velocities[i3 + 1] = velocities[i3 + 2] = 0;
+
+      /* Colour: random between magenta, cyan, violet */
+      const pick = Math.random();
+      const c = pick < 0.33 ? COLORS.magenta : pick < 0.66 ? COLORS.cyan : COLORS.violet;
+      colors[i3]     = c.r;
+      colors[i3 + 1] = c.g;
+      colors[i3 + 2] = c.b;
+
+      sizes[i] = Math.random() * 3.5 + 1.5;
+    }
+
+    particleGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    particleGeo.setAttribute('color',    new THREE.BufferAttribute(colors, 3));
+    particleGeo.setAttribute('size',     new THREE.BufferAttribute(sizes, 1));
+
+    const particleMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime:  { value: 0 },
+        uScale: { value: window.devicePixelRatio },
+      },
+      vertexShader: /* glsl */ `
+        attribute float size;
+        varying vec3 vColor;
+        uniform float uTime;
+        uniform float uScale;
+        void main() {
+          vColor = color;
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = size * uScale * (200.0 / -mv.z);
+          gl_Position  = projectionMatrix * mv;
+        }
+      `,
+      fragmentShader: /* glsl */ `
+        varying vec3 vColor;
+        void main() {
+          float d = length(gl_PointCoord - 0.5);
+          if (d > 0.5) discard;
+          float alpha = 1.0 - smoothstep(0.2, 0.5, d);
+          gl_FragColor = vec4(vColor, alpha * 0.85);
+        }
+      `,
+      vertexColors:   true,
+      transparent:    true,
+      depthWrite:     false,
+      blending:       THREE.AdditiveBlending,
+    });
+
+    const particles = new THREE.Points(particleGeo, particleMat);
+    scene.add(particles);
+
+    /* ━━━━━━━━━━━━━━━━━  Lighting  ━━━━━━━━━━━━━━━━━━━━━━ */
+    const ambientLight = new THREE.AmbientLight(0x222244, 0.5);
+    scene.add(ambientLight);
+
+    const pointLight1 = new THREE.PointLight(COLORS.magenta, 60, 20);
+    pointLight1.position.set(4, 3, 4);
+    scene.add(pointLight1);
+
+    const pointLight2 = new THREE.PointLight(COLORS.cyan, 60, 20);
+    pointLight2.position.set(-4, -2, 3);
+    scene.add(pointLight2);
+
+    const pointLight3 = new THREE.PointLight(COLORS.violet, 30, 15);
+    pointLight3.position.set(0, 5, -3);
+    scene.add(pointLight3);
+
+    /* Environment cube (simple gradient for reflections) */
+    const pmremGen = new THREE.PMREMGenerator(renderer);
+    const envScene = new THREE.Scene();
+    envScene.background = new THREE.Color(0x080818);
+    const envL1 = new THREE.PointLight(0xff00ff, 400, 20);
+    envL1.position.set(5, 5, 5);
+    envScene.add(envL1);
+    const envL2 = new THREE.PointLight(0x00ffff, 400, 20);
+    envL2.position.set(-5, -5, 5);
+    envScene.add(envL2);
+    const envTexture = pmremGen.fromScene(envScene, 0, 0.1, 100).texture;
+    scene.environment = envTexture;
+    pmremGen.dispose();
+
+    /* ━━━━━━━━━━━━━━  Background grid plane  ━━━━━━━━━━━━ */
+    const gridHelper = new THREE.GridHelper(60, 60, 0x1a0030, 0x0a0a1f);
+    gridHelper.position.y = -4;
+    gridHelper.material.transparent = true;
+    gridHelper.material.opacity = 0.4;
+    scene.add(gridHelper);
+
+    /* ━━━━━━━━━━━━━━━━  Mouse tracking  ━━━━━━━━━━━━━━━━━ */
+    const mouse   = { x: 0, y: 0 };
+    const target  = { x: 0, y: 0 };
+    let   prevMouse = { x: 0, y: 0 };
+    let   mouseSpeed = 0;
+
+    window.addEventListener('mousemove', (e) => {
+      mouse.x = (e.clientX / window.innerWidth)  * 2 - 1;
+      mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+    });
+
+    window.addEventListener('touchmove', (e) => {
+      if (e.touches.length > 0) {
+        mouse.x = (e.touches[0].clientX / window.innerWidth)  * 2 - 1;
+        mouse.y = -(e.touches[0].clientY / window.innerHeight) * 2 + 1;
+      }
+    }, { passive: true });
+
+    /* ━━━━━━━━━━━━━  Explosion / Reform logic  ━━━━━━━━━━ */
+    let isExploded    = false;
+    let isAnimating   = false;
+    let explodeTime   = 0;
+
+    function explode() {
+      if (isAnimating) return;
+      isAnimating = true;
+      isExploded  = true;
+
+      /* Hide glass sphere */
+      gsap.to(sphere.scale, { x: 0, y: 0, z: 0, duration: 0.3, ease: 'power2.in' });
+
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const i3 = i * 3;
+        const dx = positions[i3]     - 0;
+        const dy = positions[i3 + 1] - 0;
+        const dz = positions[i3 + 2] - 0;
+        const len = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
+
+        velocities[i3]     = (dx / len) * EXPLODE_FORCE * (0.6 + Math.random() * 0.8);
+        velocities[i3 + 1] = (dy / len) * EXPLODE_FORCE * (0.6 + Math.random() * 0.8);
+        velocities[i3 + 2] = (dz / len) * EXPLODE_FORCE * (0.6 + Math.random() * 0.8);
+      }
+
+      explodeTime = performance.now();
+
+      /* After brief pause, reform */
+      setTimeout(reform, 800);
+    }
+
+    function reform() {
+      const startPositions = new Float32Array(positions);
+
+      const anim = { t: 0 };
+      gsap.to(anim, {
+        t: 1,
+        duration: REFORM_DURATION,
+        ease: 'power3.inOut',
+        onUpdate() {
+          for (let i = 0; i < PARTICLE_COUNT; i++) {
+            const i3 = i * 3;
+            positions[i3]     = THREE.MathUtils.lerp(startPositions[i3],     originals[i3],     anim.t);
+            positions[i3 + 1] = THREE.MathUtils.lerp(startPositions[i3 + 1], originals[i3 + 1], anim.t);
+            positions[i3 + 2] = THREE.MathUtils.lerp(startPositions[i3 + 2], originals[i3 + 2], anim.t);
+          }
+          particleGeo.attributes.position.needsUpdate = true;
+        },
+        onComplete() {
+          isExploded  = false;
+          isAnimating = false;
+          /* Bring glass sphere back */
+          gsap.to(sphere.scale, { x: 1, y: 1, z: 1, duration: 0.6, ease: 'elastic.out(1, 0.5)' });
+        },
+      });
+    }
+
+    /* Raycaster for click detection */
+    const raycaster = new THREE.Raycaster();
+    const clickVec  = new THREE.Vector2();
+
+    function onPointerDown(e) {
+      const cx = e.clientX ?? e.touches?.[0]?.clientX ?? 0;
+      const cy = e.clientY ?? e.touches?.[0]?.clientY ?? 0;
+      clickVec.x =  (cx / window.innerWidth)  * 2 - 1;
+      clickVec.y = -(cy / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(clickVec, camera);
+      const hits = raycaster.intersectObject(sphere);
+      if (hits.length > 0) explode();
+    }
+
+    canvas.addEventListener('pointerdown', onPointerDown);
+
+    /* ━━━━━━━━━━━━━━━━  Glitch effect  ━━━━━━━━━━━━━━━━━━ */
+    const titleEl    = document.getElementById('title');
+    const subtitleEl = document.getElementById('subtitle');
+    let glitchTimer  = null;
+
+    function triggerGlitch() {
+      titleEl.classList.add('glitch-active');
+      subtitleEl.classList.add('glitch-active');
+      clearTimeout(glitchTimer);
+      glitchTimer = setTimeout(() => {
+        titleEl.classList.remove('glitch-active');
+        subtitleEl.classList.remove('glitch-active');
+      }, 200);
+    }
+
+    /* ━━━━━━━━━━━━━━━━  Resize handler  ━━━━━━━━━━━━━━━━━ */
+    function onResize() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+      composer.setSize(w, h);
+      bloomPass.resolution.set(w, h);
+    }
+
+    window.addEventListener('resize', onResize);
+
+    /* ━━━━━━━━━━━━━━━━  Animation loop  ━━━━━━━━━━━━━━━━━ */
+    const clock = new THREE.Clock();
+
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt    = clock.getDelta();
+      const elapsed = clock.getElapsedTime();
+
+      /* Smooth mouse follow */
+      target.x += (mouse.x - target.x) * 0.05;
+      target.y += (mouse.y - target.y) * 0.05;
+
+      /* Mouse speed (for glitch trigger) */
+      const dx = mouse.x - prevMouse.x;
+      const dy = mouse.y - prevMouse.y;
+      mouseSpeed = Math.sqrt(dx * dx + dy * dy);
+      prevMouse.x = mouse.x;
+      prevMouse.y = mouse.y;
+
+      if (mouseSpeed > 0.04) triggerGlitch();
+
+      /* Sphere follow mouse */
+      sphere.position.x += (target.x * 2 - sphere.position.x) * 0.04;
+      sphere.position.y += (target.y * 1.5 - sphere.position.y) * 0.04;
+      sphere.rotation.y = elapsed * 0.3;
+      sphere.rotation.x = Math.sin(elapsed * 0.5) * 0.15;
+
+      /* Core pulsing */
+      const pulse = 1 + Math.sin(elapsed * 3) * 0.15;
+      core.scale.set(pulse, pulse, pulse);
+      coreMat.color.lerpColors(COLORS.magenta, COLORS.cyan, Math.sin(elapsed * 2) * 0.5 + 0.5);
+
+      /* Particles follow sphere */
+      particles.position.copy(sphere.position);
+      particles.rotation.y = elapsed * 0.15;
+
+      /* Update particles during explosion */
+      if (isExploded && !isAnimating) {
+        /* This state is brief—velocities carry them outward */
+      }
+      if (isExploded) {
+        const friction = 0.96;
+        for (let i = 0; i < PARTICLE_COUNT; i++) {
+          const i3 = i * 3;
+          velocities[i3]     *= friction;
+          velocities[i3 + 1] *= friction;
+          velocities[i3 + 2] *= friction;
+          positions[i3]     += velocities[i3]     * dt * 5;
+          positions[i3 + 1] += velocities[i3 + 1] * dt * 5;
+          positions[i3 + 2] += velocities[i3 + 2] * dt * 5;
+        }
+        particleGeo.attributes.position.needsUpdate = true;
+      } else if (!isAnimating) {
+        /* Idle particle shimmer */
+        for (let i = 0; i < PARTICLE_COUNT; i++) {
+          const i3 = i * 3;
+          const offset = i * 0.001;
+          positions[i3]     = originals[i3]     + Math.sin(elapsed * 1.5 + offset) * 0.04;
+          positions[i3 + 1] = originals[i3 + 1] + Math.cos(elapsed * 1.2 + offset) * 0.04;
+          positions[i3 + 2] = originals[i3 + 2] + Math.sin(elapsed * 1.8 + offset) * 0.04;
+        }
+        particleGeo.attributes.position.needsUpdate = true;
+      }
+
+      /* Shader time */
+      particleMat.uniforms.uTime.value = elapsed;
+
+      /* Lights orbit */
+      pointLight1.position.x = Math.sin(elapsed * 0.7) * 5;
+      pointLight1.position.z = Math.cos(elapsed * 0.7) * 5;
+      pointLight2.position.x = Math.cos(elapsed * 0.5) * 5;
+      pointLight2.position.z = Math.sin(elapsed * 0.5) * 5;
+
+      controls.update();
+      composer.render();
+    }
+
+    /* ━━━━━━━━━━━━━  GSAP entry animations  ━━━━━━━━━━━━━ */
+    function playEntryAnimations() {
+      const tl = gsap.timeline({ defaults: { ease: 'power3.out' } });
+
+      /* Sphere scales in */
+      sphere.scale.set(0, 0, 0);
+      tl.to(sphere.scale, { x: 1, y: 1, z: 1, duration: 1.4, ease: 'elastic.out(1, 0.6)' }, 0.2);
+
+      /* Title */
+      tl.to('#title', { opacity: 1, y: 0, duration: 1, ease: 'power2.out' }, 0.6);
+      tl.from('#title', { y: 30, duration: 1, ease: 'power2.out' }, 0.6);
+
+      /* Subtitle */
+      tl.to('#subtitle', { opacity: 1, y: 0, duration: 0.8, ease: 'power2.out' }, 0.9);
+      tl.from('#subtitle', { y: 20, duration: 0.8, ease: 'power2.out' }, 0.9);
+
+      /* Click hint */
+      tl.to('#click-hint', { opacity: 1, duration: 0.8 }, 1.5);
+      tl.to('#click-hint', { opacity: 0, duration: 0.6 }, 4.5);
+
+      /* Bloom ramps up */
+      bloomPass.strength = 0;
+      tl.to(bloomPass, { strength: 1.4, duration: 2, ease: 'power2.inOut' }, 0.2);
+    }
+
+    /* ━━━━━━━━━━━━━━━━━━━  Boot  ━━━━━━━━━━━━━━━━━━━━━━━━ */
+    function init() {
+      /* Hide loader */
+      const loader = document.getElementById('loader');
+      loader.classList.add('hidden');
+      setTimeout(() => loader.remove(), 700);
+
+      /* Start rendering and animations */
+      animate();
+      playEntryAnimations();
+    }
+
+    /* Wait a tick so the first frame compiles shaders, then reveal */
+    renderer.compile(scene, camera);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(init);
+    });
+  </script>
+</body>
+</html>
